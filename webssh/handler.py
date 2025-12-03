@@ -30,10 +30,37 @@ except ImportError:
     from urlparse import urlparse
 
 
+from tornado.options import define
+define('hosts', default='/etc/webssh-hosts', help='Hosts file for pre-configured connections')
+
 DEFAULT_PORT = 22
 
 swallow_http_errors = True
 redirecting = None
+
+
+def lookup_token(token):
+    """Lee token del archivo --tokenfile
+    Formato: token hostname port username keypath passphrase
+    """
+    try:
+        with open(options.hosts) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split()
+                if len(parts) >= 5 and parts[0] == token:
+                    return {
+                        'hostname': parts[1],
+                        'port': int(parts[2]),
+                        'username': parts[3],
+                        'keypath': parts[4],
+                        'passphrase': parts[5] if len(parts) > 5 else ''
+                    }
+    except FileNotFoundError:
+        pass
+    return None
 
 
 class InvalidValueError(Exception):
@@ -388,13 +415,33 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
                     )
 
     def get_args(self):
-        hostname = self.get_hostname()
-        port = self.get_port()
-        username = self.get_value('username')
-        password = self.get_argument('password', u'')
-        privatekey, filename = self.get_privatekey()
-        passphrase = self.get_argument('passphrase', u'')
-        totp = self.get_argument('totp', u'')
+        token = self.get_argument('token', u'')
+        if token:
+            host_data = lookup_token(token)
+            if not host_data:
+                raise InvalidValueError('Invalid token')
+            hostname = host_data['hostname']
+            port = host_data['port']
+            username = host_data['username']
+            passphrase = host_data['passphrase']
+            password = u''
+            try:
+                with open(host_data['keypath']) as f:
+                    privatekey = f.read()
+            except FileNotFoundError:
+                raise InvalidValueError('Key file not found')
+            except PermissionError:
+                raise InvalidValueError('Key file permission denied')
+            filename = host_data['keypath']
+            totp = u''
+        else:
+            hostname = self.get_hostname()
+            port = self.get_port()
+            username = self.get_value('username')
+            password = self.get_argument('password', u'')
+            privatekey, filename = self.get_privatekey()
+            passphrase = self.get_argument('passphrase', u'')
+            totp = self.get_argument('totp', u'')
 
         if isinstance(self.policy, paramiko.RejectPolicy):
             self.lookup_hostname(hostname, port)
