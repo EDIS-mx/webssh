@@ -32,6 +32,7 @@ except ImportError:
 
 from tornado.options import define
 define('hosts', default='/etc/webssh-hosts', help='Hosts file for pre-configured connections')
+define('allowed_ips', default='', help='Comma-separated list of allowed client IPs')
 
 DEFAULT_PORT = 22
 
@@ -267,6 +268,14 @@ class MixinHandler(object):
         ip = context.address[0]
         lst = context.trusted_downstream
         ip_address = None
+
+        # Check allowed_ips whitelist
+        allowed = options.allowed_ips
+        if allowed:
+            allowed_list = [x.strip() for x in allowed.split(',') if x.strip()]
+            if allowed_list and ip not in allowed_list:
+                logging.warning('IP {!r} not in allowed_ips {!r}'.format(ip, allowed_list))
+                return True
 
         if lst and ip not in lst:
             logging.warning(
